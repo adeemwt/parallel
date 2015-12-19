@@ -11,7 +11,7 @@
 
 void generateRandomIntArray(int *numbers, int size, int max);
 void printIntArray(const int *array, int size);
-void createHistParallel(const int* numbers, int size, int *hist, int histSize,int numprocs);
+void createHistParallel(const int* numbers, int size, int *hist, int histSize, int numprocs);
 void createHistLinear(const int* numbers, int size, int *hist);
 void normalRun(int argc, char *argv[]);
 void test1();
@@ -28,7 +28,7 @@ gParallelRun = DEFAULT_PARALLEL_RUN;
 */
 int main(int argc, char *argv[])
 {
-	
+
 
 	for (int i = 1; i < argc; i++)
 	{
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	normalRun( argc, argv);
+	normalRun(argc, argv);
 	getchar();
 }
 
@@ -111,18 +111,21 @@ void normalRun(int argc, char *argv[])
 		MPI_Comm_rank(MPI_COMM_WORLD, &me);
 
 		MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-		int *buff = (int*)malloc(sizeof(int)*( gArraySize / numprocs));
+		int *buff = (int*)malloc(sizeof(int)*(gArraySize / numprocs));
 		int * temp_hist = (int*)calloc(gHistSize, sizeof(int));
 		int * temp_hist_2 = (int*)calloc(gHistSize, sizeof(int));//@initialize another temp histogram for the recursive calc T_D
 		if (me == 0) {
-		generateRandomIntArray(numbers, gArraySize, gHistSize);
+			generateRandomIntArray(numbers, gArraySize, gHistSize);
 		}
-		MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT,0, MPI_COMM_WORLD);
-		createHistParallel(buff, gArraySize/numprocs, temp_hist, gHistSize,numprocs);
+		MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT, 0, MPI_COMM_WORLD);
+		createHistParallel(buff, gArraySize / numprocs, temp_hist, gHistSize, numprocs);
 		calc_omp(buff, gArraySize / numprocs, temp_hist_2, omp_get_num_threads());// @added calc and reduce for recursive - delete if not needed T_D
-		MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(temp_hist_2, hist_2, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);// the Reduce T_D
+		MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(temp_hist_2, hist_2, gHistSize, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);// the Reduce T_D
+
 		MPI_Finalize();
+		free(temp_hist);
+		free(temp_hist_2);
 	}
 	else
 	{
@@ -142,7 +145,7 @@ void normalRun(int argc, char *argv[])
 	free(numbers);
 	free(hist);
 	free(hist_2);
-	
+
 	printf("OK\n");
 }
 
@@ -154,7 +157,7 @@ void normalRun(int argc, char *argv[])
 * @param int*	hist		Pointer to allocated and intialized to zeros histogram array
 * @param int	histSize	Histogram size
 */
-void createHistParallel(const int* numbers, int size, int *hist, int histSize,int numprocs)
+void createHistParallel(const int* numbers, int size, int *hist, int histSize, int numprocs)
 {
 #pragma omp parallel shared(hist, histSize, numbers, size) num_threads(omp_get_num_threads()/numprocs)
 {
@@ -250,7 +253,7 @@ void tests()
 	generateRandomIntArray(numbers, DEFAULT_ARRAY_SIZE, DEFAULT_HIST_SIZE);
 
 	createHistLinear(numbers, DEFAULT_ARRAY_SIZE, linearHist);
-	createHistParallel(numbers, DEFAULT_ARRAY_SIZE, parallelHist, DEFAULT_HIST_SIZE,1);
+	createHistParallel(numbers, DEFAULT_ARRAY_SIZE, parallelHist, DEFAULT_HIST_SIZE, 1);
 
 	printf("Linear run and parallel run should generate same histogram:\t");
 	cmpRes = memcmp(linearHist, parallelHist, DEFAULT_HIST_SIZE * sizeof(int));
