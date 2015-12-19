@@ -17,6 +17,7 @@ void normalRun(int argc, char *argv[]);
 void test1();
 void tests();
 void showHelp();
+void calc_omp(int *numbers, int size, int* hist, int tnum); // Added the other calculation method , if want to delete. ctl+f : T_D
 
 int gArraySize = DEFAULT_ARRAY_SIZE,
 gHistSize = DEFAULT_HIST_SIZE,
@@ -87,7 +88,7 @@ void normalRun(int argc, char *argv[])
 	}
 
 	hist = (int*)calloc(gHistSize, sizeof(int));
-
+	int *hist_2 = (int*)calloc(gHistSize, sizeof(int));
 	if (!numbers)
 	{
 		printf("FAILED\n");
@@ -110,15 +111,17 @@ void normalRun(int argc, char *argv[])
 		MPI_Comm_rank(MPI_COMM_WORLD, &me);
 
 		MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-		printf("numprocs = %d", numprocs);
 		int *buff = (int*)malloc(sizeof(int)*( gArraySize / numprocs));
 		int * temp_hist = (int*)calloc(gHistSize, sizeof(int));
+		int * temp_hist_2 = (int*)calloc(gHistSize, sizeof(int));//@initialize another temp histogram for the recursive calc T_D
 		if (me == 0) {
 		generateRandomIntArray(numbers, gArraySize, gHistSize);
 		}
 		MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT,0, MPI_COMM_WORLD);
 		createHistParallel(buff, gArraySize/numprocs, temp_hist, gHistSize,numprocs);
+		calc_omp(buff, gArraySize / numprocs, temp_hist_2, omp_get_num_threads());// @added calc and reduce for recursive - delete if not needed T_D
 		MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(temp_hist_2, hist_2, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);// the Reduce T_D
 		MPI_Finalize();
 	}
 	else
@@ -130,6 +133,8 @@ void normalRun(int argc, char *argv[])
 
 	printf("Histogram:\n");
 	printIntArray(hist, gHistSize);
+	printf("Recursive way : \n");  // T_D
+	printIntArray(hist_2, gHistSize);// @added another print for hist_2 T_D
 	getchar();
 	printf("Took: %fms\n", (endTime - startTime) / 1000);
 
@@ -149,8 +154,6 @@ void normalRun(int argc, char *argv[])
 */
 void createHistParallel(const int* numbers, int size, int *hist, int histSize,int numprocs)
 {
-
-	
 #pragma omp parallel shared(hist, histSize, numbers, size) num_threads(omp_get_num_threads()/numprocs)
 {
 	int tid,
@@ -288,4 +291,33 @@ void showHelp()
 	printf("\t-t\tRun tests.\n");
 	printf("\t-h\tShow this help.\n");
 	printf("\n\n");
+}
+
+
+
+void calc_omp(int *numbers, int size, int* hist, int tnum) {//tnum = thread numbers
+	int num, tid, i;
+	if (tnum == 0)
+		return;
+#pragma omp parallel  private(tid) num_threads(tnum)
+	{
+		num = (int)(size / tnum);
+		tid = omp_get_thread_num();
+#pragma omp for
+		for (int i = 0; i < size; i += num) {
+			for (int j = i; j < i + num; j++) {
+				if (numbers[j] < i + num && numbers[j] >= i) {
+					hist[numbers[j]]++;
+					numbers[j] = -1;
+				}
+			}
+		}
+	}
+	if (tnum == 1) {
+		return;
+	}
+	else {
+		return calc_omp(numbers, size, hist, tnum / 2);
+
+	}
 }
