@@ -110,7 +110,7 @@ void normalRun(int argc, char *argv[])
 		MPI_Comm_rank(MPI_COMM_WORLD, &me);
 
 		MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-		printf("numprovs%d", numprocs);
+		printf("numprocs = %d", numprocs);
 		int *buff = (int*)malloc(sizeof(int)*( gArraySize / numprocs));
 		int * temp_hist = (int*)calloc(gHistSize, sizeof(int));
 		if (me == 0) {
