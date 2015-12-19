@@ -66,8 +66,8 @@ void normalRun(int argc, char *argv[])
 {
 
 	int *hist,
-		*numbers,
-		startTime,
+		*numbers;
+	float startTime,
 		endTime;
 	printf("\n\n");
 
