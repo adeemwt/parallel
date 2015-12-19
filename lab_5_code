@@ -118,8 +118,7 @@ void normalRun(int argc, char *argv[])
 		}
 		MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT,0, MPI_COMM_WORLD);
 		createHistParallel(buff, gArraySize/numprocs, temp_hist, gHistSize,numprocs);
-		printIntArray(temp_hist, gHistSize);
-		MPI_Reduce(hist, temp_hist, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT,MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Finalize();
 	}
 	else
@@ -290,40 +289,3 @@ void showHelp()
 	printf("\t-h\tShow this help.\n");
 	printf("\n\n");
 }
-
-
-
-
-
-
-
-/*here is what i was working on- recursive no barriers but slow on big arrays!*/
-
-void calc_omp(const int *numbers, int size, int* hist, int tnum) {//tnum = thread numbers
-	int num, tid, i;
-	if (tnum == 0)
-		return;
-#pragma omp parallel  private(tid) num_threads(tnum)
-	{
-		num = (int)(size / tnum);
-		tid = omp_get_thread_num();
-#pragma omp for
-		for (int i = 0; i < size; i += num) {
-			for (int j = i; j < i + num; j++) {
-				if (numbers[j] < i + num && numbers[j] >= i) {
-					hist[numbers[j]]++;
-					numbers[j] = -1;
-				}
-			}
-		}
-	}
-		if (tnum == 1) {
-			return;
-		}
-		else {
-			return calc_omp(numbers, size, hist, tnum / 2);
-		
-	}
-}
-
-
