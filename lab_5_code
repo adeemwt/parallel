@@ -140,7 +140,11 @@ void normalRun(int argc, char *argv[])
 
 	printf("Releasing memmory...");
 	free(numbers);
+	free(temp_hist);
+	free(temp_hist_2);
 	free(hist);
+	free(hist_2);
+	
 	printf("OK\n");
 }
 
