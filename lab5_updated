@@ -310,6 +310,7 @@ void createHistParallel_updated(const int* numbers, int size, int *hist, int his
 			myHist[numbers[i]+tid*histSize]++;
 		}
 		int sum;
+#pragma omp parallel for
 		for(int i = 0; i < histSize; i++)
 		{
 			sum =0;
