@@ -1,36 +1,38 @@
 #include <omp.h>
+#include <mpi.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mpi.h>
 
 #define DEFAULT_HIST_SIZE 256
 #define DEFAULT_ARRAY_SIZE 10000
 #define DEFAULT_PARALLEL_RUN 1
+#define MASTER 0
 
 void generateRandomIntArray(int *numbers, int size, int max);
 void printIntArray(const int *array, int size);
-void createHistParallel(const int* numbers, int size, int *hist, int histSize, int numprocs);
-void createHistParallel_updated(const int* numbers, int size, int *hist, int histSize,int numprocs);
-void genarateMPI(int argc, char *argv[],int*numbers,int *hist,double *startTime,double *endTime);
+void createHistParallel(const int* numbers, int size, int *hist, int histSize);
 void createHistLinear(const int* numbers, int size, int *hist);
-void normalRun(int argc, char *argv[]);
-void test1();
 void tests();
 void showHelp();
-
+void mpiRun();
+void createHistMpi(int* numbers, int size, int *hist, int histSize);
 
 int gArraySize = DEFAULT_ARRAY_SIZE,
 gHistSize = DEFAULT_HIST_SIZE,
-gParallelRun = DEFAULT_PARALLEL_RUN;
+gParallelRun = DEFAULT_PARALLEL_RUN,
+rank,
+numOfProcs;
 
 /**
 * Entry point. Configure app.
 */
 int main(int argc, char *argv[])
 {
-
+	MPI_Init(&argc, &argv);
+	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcs);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	for (int i = 1; i < argc; i++)
 	{
@@ -49,6 +51,7 @@ int main(int argc, char *argv[])
 				break;
 			case 't':
 				tests();
+				MPI_Finalize();
 				return 0;
 			case 'h':
 				showHelp();
@@ -57,101 +60,95 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	normalRun(argc, argv);
-	getchar();
+	mpiRun();
+
+	MPI_Finalize();
 }
 
 /**
-* Runs the application in normal mode.
+* Runs the program in mpi mode.
 */
-void normalRun(int argc, char *argv[])
+void mpiRun()
 {
+	int *hist = 0,
+		*numbers = 0,   // Initialized to avoid warnigns
+		startTime = 0,  // Initialized to avoid warnigns
+		endTime,
+		arraySize = gArraySize * numOfProcs; // Multiply by number of procs so array size will be dividable by it.
 
-	int *hist,
-		*numbers;
-	double startTime,
-		endTime;
-	printf("\n\n");
-
-	printf("Running parameters:\n");
-	printf("Array size:\t%d\n", gArraySize);
-	printf("Histogram size:\t%d\n", gHistSize);
-	printf("Parallel run?\t%s\n", gParallelRun ? "Yes" : "No");
-	
-	printf("\n\n");
-
-	printf("Allocating memory...\t");
-	numbers = (int*)malloc(sizeof(int) * gArraySize);
-
-	if (!numbers)
+	if (rank == MASTER)
 	{
-		printf("FAILED\n");
-		return;
+		printf("\n\n");
+
+		printf("Running parameters:\n");
+		printf("Array size:\t%d\n", arraySize);
+		printf("Histogram size:\t%d\n", gHistSize);
+		printf("Parallel run?\t%s\n", gParallelRun ? "Yes" : "No");
+		printf("Num of procs:\t%d\n", numOfProcs);
+
+		printf("\n\n");
+
+		numbers = (int*)malloc(sizeof(int) * arraySize);
+		hist = (int*)malloc(sizeof(int) * gHistSize);
+
+		printf("Generating array of numbers...\t");
+		generateRandomIntArray(numbers, arraySize, gHistSize);
+		printf("OK\n");
+
+		printf("Generating histogram...\t");
+		startTime = (int)omp_get_wtime();
 	}
-
-	hist = (int*)calloc(gHistSize, sizeof(int));
-	int *hist_2 = (int*)calloc(gHistSize, sizeof(int));
-	if (!numbers)
-	{
-		printf("FAILED\n");
-		return;
-	}
-
-	printf("OK\n");
-
-	printf("Generating number of arrays...\t");
-	generateRandomIntArray(numbers, gArraySize, gHistSize);
-	printf("OK\n");
-
-	printf("Generating histogram...\t");
-	startTime = omp_get_wtime();
 
 	if (gParallelRun)
 	{
-		genarateMPI(argc,argv,numbers,hist,&startTime,&endTime);
+		createHistMpi(numbers, arraySize, hist, gHistSize);
 	}
-	else
+
+	if (rank == MASTER)
 	{
-		createHistLinear(numbers, gArraySize, hist);//....... if want to keep the recursive add test here
-		endTime = omp_get_wtime();
-	}
-	
-	printf("OK\n");
-	printf("Histogram:\n");
-	printIntArray(hist, gHistSize);
-	getchar();
-	printf("Took: %fms\n", (endTime - startTime) / 1000);
-
-	printf("Releasing memmory...");
-	free(numbers);
-	free(hist);
-	free(hist_2);
-	printf("OK\n");
-}
-
-
-void genarateMPI(int argc, char *argv[],int*numbers,int *hist,double *startTime,double *endTime){
-		MPI_Init(&argc, &argv);
-		int me, numprocs;
-		MPI_Comm_rank(MPI_COMM_WORLD, &me);
-
-		MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-		int *buff = (int*)malloc(sizeof(int)*(gArraySize / numprocs));
-		int * temp_hist = (int*)calloc(gHistSize, sizeof(int));
-		if (me == 0) {
-			generateRandomIntArray(numbers, gArraySize, gHistSize);
+		if (!gParallelRun)
+		{
+			createHistLinear(numbers, arraySize, hist);
 		}
-		if(me == 0)
-			*startTime = omp_get_wtime();
-		MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT, 0, MPI_COMM_WORLD);
-		createHistParallel_updated(buff, gArraySize / numprocs, temp_hist, gHistSize, numprocs);
-		MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-		if (me ==0)	
-			*endTime = omp_get_wtime();
-		MPI_Finalize();
-		free(temp_hist);
+		endTime =(int) omp_get_wtime();
+		printf("OK\n");
 
+		printf("Histogram:\n");
+		printIntArray(hist, gHistSize);
+
+		printf("Took: %fms\n", (endTime - startTime) / 10000.0);
+
+		free(numbers);
+		free(hist);
+	}
 }
+
+/**
+* Creates histogram of numbers array into hist array.
+* @param int* numbers
+* @param int size
+* @param int* hist
+* @param int histSize
+*/
+void createHistMpi( int* numbers, int size, int *hist, int histSize)
+{
+	int *myNumbers,
+		chunkSize = size / numOfProcs,
+		*myHist;
+
+	myNumbers = (int*)malloc(chunkSize* sizeof(int));
+	myHist = (int*)malloc( histSize *sizeof(int) );
+
+	MPI_Scatter(numbers, chunkSize, MPI_INT, myNumbers, chunkSize, MPI_INT, MASTER, MPI_COMM_WORLD);
+
+	createHistParallel(myNumbers, chunkSize, myHist, histSize);
+
+	MPI_Reduce(myHist, hist, histSize, MPI_INT, MPI_SUM, MASTER, MPI_COMM_WORLD);
+
+	free(myNumbers);
+	free(myHist);
+}
+
 /**
 * Generates histogram of given array. Runs on parallel.
 *
@@ -160,33 +157,38 @@ void genarateMPI(int argc, char *argv[],int*numbers,int *hist,double *startTime,
 * @param int*	hist		Pointer to allocated and intialized to zeros histogram array
 * @param int	histSize	Histogram size
 */
-void createHistParallel(const int* numbers, int size, int *hist, int histSize, int numprocs)
+void createHistParallel(const int* numbers, int size, int *hist, int histSize)
 {
-#pragma omp parallel shared(hist, histSize, numbers, size) num_threads(omp_get_num_threads()/numprocs)
-{
-	int tid,
-		*myHist;
+	int *allHists, numOfThreads;
+#pragma omp parallel shared(hist, histSize, numbers, size, allHists) num_threads(omp_get_num_threads())
+	{
+		int tid;
+#pragma omp single
+		{
+			numOfThreads = omp_get_num_threads();
+			allHists = (int*)calloc(histSize * numOfThreads, sizeof(int));
+		}
 
-	myHist = (int*)calloc(histSize, sizeof(int));
-
-	tid = omp_get_thread_num();
+		tid = omp_get_thread_num();
 
 #pragma omp for
-	for (int i = 0; i < size; i++)
-	{
-		myHist[numbers[i]]++;
-	}
+		for (int i = 0; i < size; i++)
+		{
+			allHists[numbers[i] + tid * histSize]++;
+		}
 
-	for (int i = 0; i < histSize; i++)
-	{
-#pragma omp barrier
-	{
-		hist[(i + tid) % histSize] += myHist[(i + tid) % histSize];
-	}
-	}
+#pragma omp parallel for
+		for (int i = 0; i < histSize; i++)
+		{
+			hist[i] = 0;
+			for (int j = 0; j < numOfThreads; j++)
+			{
+				hist[i] += allHists[i + j * histSize];
+			}
+		}
 
-	free(myHist);
-}
+	}
+	free(allHists);
 }
 
 /**
@@ -249,40 +251,64 @@ void tests()
 {
 	int linearHist[DEFAULT_HIST_SIZE] = { 0 },
 		parallelHist[DEFAULT_HIST_SIZE] = { 0 },
-		recursiveHist[DEFAULT_HIST_SIZE] = { 0 },
+		parallelMpiHist[DEFAULT_HIST_SIZE] = { 0 },
 		numbers[DEFAULT_ARRAY_SIZE],
 		cmpRes,
 		count = 0;
-	
-	generateRandomIntArray(numbers, DEFAULT_ARRAY_SIZE, DEFAULT_HIST_SIZE);
-	
-	createHistLinear(numbers, DEFAULT_ARRAY_SIZE, linearHist);
-	createHistParallel_updated(numbers, DEFAULT_ARRAY_SIZE, parallelHist, DEFAULT_HIST_SIZE, 1);
-	printf("Linear run and parallel run should generate same histogram:\t");
-	cmpRes = memcmp(linearHist, parallelHist, DEFAULT_HIST_SIZE * sizeof(int));
-	if (cmpRes == 0)
+
+	if (rank == MASTER)
 	{
-		printf("PASS\n");
-	}
-	else {
-		printf("FAILED\n");
+		generateRandomIntArray(numbers, DEFAULT_ARRAY_SIZE, DEFAULT_HIST_SIZE);
+
+		createHistLinear(numbers, DEFAULT_ARRAY_SIZE, linearHist);
+		createHistParallel(numbers, DEFAULT_ARRAY_SIZE, parallelHist, DEFAULT_HIST_SIZE);
+		printf("Linear run and parallel run should generate same histogram:\t");
+		cmpRes = memcmp(linearHist, parallelHist, DEFAULT_HIST_SIZE * sizeof(int));
+		if (cmpRes == 0)
+		{
+			printf("PASS\n");
+		}
+		else {
+			printf("FAILED\n");
+		}
+
+		printf("Sum of histogram elements should be equal to array size:\t");
+		for (int i = 0; i < DEFAULT_HIST_SIZE; i++)
+		{
+			count += parallelHist[i];
+		}
+
+		if (count == DEFAULT_ARRAY_SIZE)
+		{
+			printf("PASS\n");
+		}
+		else {
+			printf("FAILED\n");
+		}
+
+		printf("Linear run and parallel mpi run should generate same histogram:\t");
 	}
 
+	createHistMpi(numbers, DEFAULT_ARRAY_SIZE, parallelMpiHist, DEFAULT_HIST_SIZE);
 
-	printf("Sum of parallel histogram elements should be equal to array size:\t");
-	for (int i = 0; i < DEFAULT_HIST_SIZE; i++)
+	if (rank == MASTER)
 	{
-		count += parallelHist[i];
-	}
+		cmpRes = memcmp(linearHist, parallelMpiHist, DEFAULT_HIST_SIZE * sizeof(int));
+		if (cmpRes == 0)
+		{
+			printf("PASS\n");
+		}
+		else {
+			printf("FAILED\n");
+			printf("Linear run: \n");
+			printIntArray(linearHist, DEFAULT_HIST_SIZE);
+			printf("\n\n");
+			printf("MPI run:\n");
+			printIntArray(parallelMpiHist, DEFAULT_HIST_SIZE);
+		}
 
-	if (count == DEFAULT_ARRAY_SIZE)
-	{
-		printf("PASS\n");
+		printf("\n\n");
 	}
-	else {
-		printf("FAILED\n");
-	}
-	printf("\n\n");
 }
 
 /**
@@ -301,31 +327,3 @@ void showHelp()
 	printf("\t-h\tShow this help.\n");
 	printf("\n\n");
 }
-void createHistParallel_updated(const int* numbers, int size, int *hist, int histSize,int numprocs)
-{	
-
-	int *myHist = (int*) calloc(histSize*omp_get_num_threads(), sizeof(int));
-	#pragma omp parallel shared(hist, histSize, numbers, size,myHist) 
-	{
-		int tid;
-		tid = omp_get_thread_num();
-		
-		#pragma omp for
-		for(int i = 0; i < size; i++)
-		{
-			myHist[numbers[i]+tid*histSize]++;
-		}
-		int sum;
-		#pragma omp parallel for
-		for(int i = 0; i < histSize; i++)
-		{
-			sum =0;
-			for(int j=0 ; j < omp_get_num_threads();j++)
-				sum+= myHist[i+j*histSize];
-			hist[i] = sum;
-		}
-		
-	}
-	free(myHist);
-}
-
