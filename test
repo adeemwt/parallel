@@ -12,7 +12,7 @@
 void generateRandomIntArray(int *numbers, int size, int max);
 void printIntArray(const int *array, int size);
 void createHistParallel(const int* numbers, int size, int *hist, int histSize, int numprocs);
-void genarateMPI(int argc, char *argv[], int*numbers, int *hist, double *startTime, double *endTime);
+void genarateMPI(int argc, char *argv[], int*numbers, int *hist,int size,int histSize, double *startTime, double *endTime);
 void createHistLinear(const int* numbers, int size, int *hist);
 void normalRun(int argc, char *argv[]);
 void test1();
@@ -107,11 +107,11 @@ void normalRun(int argc, char *argv[])
 
 	if (gParallelRun)
 	{
-		genarateMPI(argc, argv, numbers, hist, &startTime, &endTime);
+		genarateMPI(argc, argv, numbers, hist,gArraySize,gHistSize,&startTime, &endTime);
 	}
 	else
 	{
-		createHistLinear(numbers, gArraySize, hist);//....... if want to keep the recursive add test here
+		createHistLinear(numbers, gArraySize, hist);
 		endTime = omp_get_wtime();
 	}
 
@@ -128,23 +128,31 @@ void normalRun(int argc, char *argv[])
 	printf("OK\n");
 }
 
-
-void genarateMPI(int argc, char *argv[], int*numbers, int *hist, double *startTime, double *endTime) {
+/**
+* Generates MPI_Comm_World, and runs createHistParallel for creating the Histogram.
+*
+* @param int*	numbers		Array of numbers
+* @param int	size		Size of array
+* @param int*	hist		Pointer to allocated and intialized to zeros histogram array
+* @param int	histSize	Histogram size
+* @param int	numprocs	MPI_Comm_World Size
+*/
+void genarateMPI(int argc, char *argv[], int*numbers, int *hist, int size,int histSize,double *startTime, double *endTime) {
 	MPI_Init(&argc, &argv);
 	int me, numprocs;
 	MPI_Comm_rank(MPI_COMM_WORLD, &me);
 
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-	int *buff = (int*)malloc(sizeof(int)*(gArraySize / numprocs));
+	int *buff = (int*)malloc(sizeof(int)*(size / numprocs));
 	int * temp_hist = (int*)calloc(gHistSize, sizeof(int));
 	if (me == 0) {
-		generateRandomIntArray(numbers, gArraySize, gHistSize);
+		generateRandomIntArray(numbers, size,histSize);
 	}
 	if (me == 0)
 		*startTime = omp_get_wtime();
-	MPI_Scatter(numbers, gArraySize / numprocs, MPI_INT, buff, gArraySize / numprocs, MPI_INT, 0, MPI_COMM_WORLD);
-	createHistParallel(buff, gArraySize / numprocs, temp_hist, gHistSize, numprocs);
-	MPI_Reduce(temp_hist, hist, gHistSize, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Scatter(numbers,size / numprocs, MPI_INT, buff, size / numprocs, MPI_INT, 0, MPI_COMM_WORLD);
+	createHistParallel(buff, size / numprocs, temp_hist, histSize, numprocs);
+	MPI_Reduce(temp_hist, hist, histSize, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
 	if (me == 0)
 		*endTime = omp_get_wtime();
 	MPI_Finalize();
@@ -167,10 +175,11 @@ void createHistParallel(const int* numbers, int size, int *hist, int histSize, i
 	{
 		numT = omp_get_num_threads();
 	}
+
 	int *myHist = (int*)calloc(histSize*numT, sizeof(int));
 	int sum;
-#pragma omp parallel shared(hist, histSize, numbers, size,myHist) ,num_threads(omp_get_num_threads()%numprocs)
-	/*num_threads() : - used in order to prevent competition between processes over threads*/
+#pragma omp parallel shared(hist, histSize, numbers, size,myHist)  num_threads(omp_get_num_threads()/numprocs)
+	/*num_threads() :- used in order to prevent competition between processes over threads*/
 	{
 		int tid;
 		tid = omp_get_thread_num();
