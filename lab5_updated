@@ -160,7 +160,7 @@ void createHistMpi( int* numbers, int size, int *hist, int histSize)
 void createHistParallel(const int* numbers, int size, int *hist, int histSize)
 {
 	int *allHists, numOfThreads;
-#pragma omp parallel shared(hist, histSize, numbers, size, allHists) num_threads(omp_get_num_threads())
+#pragma omp parallel shared(hist, histSize, numbers, size, allHists) 
 	{
 		int tid;
 #pragma omp single
