@@ -1,0 +1,94 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+#include <time.inl>
+struct point{
+	int id,x,y;
+	int newxp,newyp;
+} ;
+
+void bubble_sortx(point *list, int size);
+void bubble_sorty(point *list, int size);
+
+void main(){
+	int arraySize=10;
+	int max=5;
+	point *points = (point*)malloc(sizeof(point)*arraySize);
+	srand(time(NULL));
+	for(int i=0; i < arraySize;i++){
+		points[i].x = rand() % max;
+		points[i].y =rand() % max;
+		points[i].id = i;
+		points[i].newxp =i;
+		points[i].newyp = i;
+
+	}
+	printf("\nbefore\n");
+	for(int i =0 ; i < arraySize;i++){
+	float position =pow(points[i].newxp,2.0)*pow(points[i].newyp,2.0);
+	printf("x = %d,y= %d,positions = %f\n",points[i].x,points[i].y,position);
+	 }
+	bubble_sortx(points,arraySize);
+	bubble_sorty(points,arraySize);
+	printf("\nafter\n");
+	 for(int i =0 ; i < arraySize;i++){
+		 float position =pow(points[i].newxp,2.0)*pow(points[i].newyp,2.0);
+		 printf("x = %d,y= %d,positions = %f\n",points[i].x,points[i].y,position);
+	 }
+	 getchar();
+}
+
+
+
+
+ 
+void bubble_sortx(point *list, int size)
+{
+  int c, d;
+  point t;
+ 
+  for (c = 0 ; c < ( size - 1 ); c++)
+  {
+    for (d = 0 ; d < size - c - 1; d++)
+    {
+		if (list[d].x > list[d+1].x)
+      {
+		  int p = list[d].newxp;
+		  list[d].newxp=list[d+1].newxp;
+		  list[d+1].newxp = p;
+        t         = list[d];
+        list[d]   = list[d+1];
+        list[d+1] = t;
+      }
+    }
+  }
+
+}
+
+void bubble_sorty(point *list, int size)
+{
+  int c, d;
+  point t;
+ 
+  for (c = 0 ; c < ( size - 1 ); c++)
+  {
+    for (d = 0 ; d < size - c - 1; d++)
+    {
+		if (list[d].y > list[d+1].y)
+      {
+		  int p = list[d].newyp;
+		  list[d].newyp=list[d+1].newyp;
+		  list[d+1].newyp = p;
+		list[d].newyp++;
+        t         = list[d];
+        list[d]   = list[d+1];
+        list[d+1] = t;
+      }
+    }
+  }
+}
+
+
+///ANOTHER TEST
