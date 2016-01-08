@@ -3,11 +3,16 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
-#include <time.inl>
 struct point{
 	int id,x,y;
 	int newxp,newyp;
 } ;
+/*
+*Bubble sort at the moment, switch to 	Quicksort if it works.....
+*1. sort the points by x,y - newxp,newyp are the positions for the numbers in the new arrray .
+*2. get the new positions whichi will be according to the calc given.
+*3. NOTE: not done yet, add and sort the point by the new positions calculated.
+*/
 
 void bubble_sortx(point *list, int size);
 void bubble_sorty(point *list, int size);
@@ -25,19 +30,22 @@ void main(){
 		points[i].newyp = i;
 
 	}
-	printf("\nbefore\n");
+	printf("\nBefore:-->\n");
 	for(int i =0 ; i < arraySize;i++){
-	float position =pow(points[i].newxp,2.0)*pow(points[i].newyp,2.0);
+	float position =pow(points[i].newxp,2.0)+pow(points[i].newyp,2.0);
 	printf("x = %d,y= %d,positions = %f\n",points[i].x,points[i].y,position);
 	 }
 	bubble_sortx(points,arraySize);
 	bubble_sorty(points,arraySize);
-	printf("\nafter\n");
-	 for(int i =0 ; i < arraySize;i++){
-		 float position =pow(points[i].newxp,2.0)*pow(points[i].newyp,2.0);
+	printf("\nAfter:-->\n");
+	for(int i =0 ; i < arraySize;i++){
+		 float position =pow(points[i].newxp,2.0)+pow(points[i].newyp,2.0);
 		 printf("x = %d,y= %d,positions = %f\n",points[i].x,points[i].y,position);
-	 }
+	}
 	 getchar();
+	 
+	 
+	 
 }
 
 
