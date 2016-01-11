@@ -1,0 +1,237 @@
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include <omp.h>
+#include <stdlib.h>
+#include <time.h>
+#include <string.h>
+#define nBlocks 1
+void printIntArray(const int *array, int size);
+void generateRandomIntArray(int *numbers, int size, int max);
+cudaError_t createHistParallel(int* numbers, int size, int *hist, int histSize);
+void createHistParallel_(const int* numbers, int size, int *hist, int histSize);
+void printIntArray(const int *array, int size);
+void  TIMER(cudaEvent_t start,cudaEvent_t end);
+float TIMERvalue(cudaEvent_t start,cudaEvent_t end);
+__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads);
+
+__global__ void addKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads)
+{
+	int tid = threadIdx.x;
+	int sizet= numOfThreads*size;
+	int step = tid*size;
+	int i;
+	for(i = step; i < step+size; i++)
+	{
+		allhists[numbers[i] + tid*sizet]++;
+	}
+}
+__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads)
+{	
+	int tid = threadIdx.x;
+	size = size*numOfThreads;
+	int i;
+	for(i = 0; i < size; i++)
+	{
+		for(int j = 0; j < numOfThreads; j++)
+		{
+			hist[i] += allhists[i + j *size];
+		}
+	}
+}
+void generateRandomIntArray(int *numbers, int size, int max)
+{
+	for(int i = 0; i < size; i++)
+		numbers[i] = rand() % max;
+}
+int main()
+{
+	int* arr = (int*)malloc(256*sizeof(int));
+	int arrSize = 256;
+	generateRandomIntArray(arr,arrSize,arrSize);
+	int* hist = (int*)malloc(sizeof(int)*arrSize);
+	int* hist_2 = (int*)malloc(sizeof(int)*arrSize);
+	// Add vectors in parallel.
+	cudaEvent_t start;
+	cudaEvent_t end;
+	cudaEventCreate( &start );
+	cudaEventCreate( &end );
+	TIMER(start,end);
+	cudaError_t cudaStatus = createHistParallel(arr, arrSize, hist,arrSize);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "addWithCuda failed!");
+		return 1;
+	}
+
+	float totalTimeC= TIMERvalue(start,end);
+	TIMER(start,end);
+	createHistParallel_(arr, arrSize,hist_2,arrSize);
+	float totalTimeOMP = TIMERvalue(start,end);
+	// cudaDeviceReset must be called before exiting in order for profiling and
+	// tracing tools such as Nsight and Visual Profiler to show complete traces.
+	cudaStatus = cudaDeviceReset();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceReset failed!");
+		return 1;
+	}
+	printf("made by Cuda::\n");
+	printIntArray(hist, arrSize);
+	printf("____________________________________\nmade by omp::\n");
+	printIntArray(hist_2, arrSize);
+	int Pass =0;
+#pragma omp for shared(Pass)
+	for(int i =0 ; i < arrSize;i++){
+		if(hist_2[i] != hist[i]){
+			Pass =1;
+			printf("%d , %d ",hist_2[i],hist[i]);
+		}
+	}
+	if(Pass ==0)
+		printf("Pass.");
+	else
+		printf("Fail.");
+	printf("\n");
+	printf("Total CUDA time :  %f  ms.\nTotal OMP run time :  %f  ms.",totalTimeC,totalTimeOMP);
+	getchar();
+	return 0;
+}
+// Helper function for using CUDA to add vectors in parallel.
+cudaError_t createHistParallel(int* numbers, int size, int *hist, int histSize)
+{
+
+
+	printf("Running Cuda, allocating memory...");
+	int *Cnumbers ,*Chist;
+	cudaError_t cudaStatus;
+	int numOfThreads =1;
+	cudaEvent_t start;
+	cudaEvent_t end;
+	cudaEventCreate( &start );
+	cudaEventCreate( &end );
+	TIMER(start,end);
+	int *allHists = (int*) calloc(histSize * numOfThreads, sizeof(int)),*c_allHists;
+	// Choose which GPU to run on, change this on a multi-GPU system.
+	cudaStatus = cudaSetDevice(0);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+		goto Error;
+	}
+
+	// Allocate GPU buffers for three vectors (two input, one output)    .
+	cudaStatus = cudaMalloc((void**)&Cnumbers, size * sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Error;
+	}
+
+	cudaStatus = cudaMalloc((void**)&Chist, size * sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Error;
+	}
+
+	cudaStatus = cudaMalloc((void**)&c_allHists, size * sizeof(int)*numOfThreads);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Error;
+	}
+	cudaStatus = cudaMemcpy(Cnumbers, numbers, size * sizeof(int), cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
+
+
+	for(int i =0 ; i <histSize * numOfThreads;i++)
+		allHists[i] =0;
+
+	cudaStatus = cudaMemcpy(c_allHists,allHists, histSize * numOfThreads* sizeof(int), cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
+	// Copy input vectors from host memory to GPU buffers.
+	// Launch a kernel on the GPU with one thread for each element.
+
+	printf("\nFinished allocating memory, time takes : %f ms.\nRunning kernel...",TIMERvalue(start,end));
+	TIMER(start,end);
+	int jumpSize = 256/ numOfThreads;
+	addKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists,numOfThreads);
+	addTotalKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists,numOfThreads);
+	printf("\nFinished Running kernel, time taken : %f ms.\n",TIMERvalue(start,end));
+
+	// cudaDeviceSynchronize waits for the kernel to finish, and returns
+	// any errors encountered during the launch.
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+		goto Error;
+	}
+
+	// Copy output vector from GPU buffer to host memory.
+	cudaStatus = cudaMemcpy(hist, Chist, size * sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
+
+Error:
+	cudaFree(Chist);
+	cudaFree(Cnumbers);
+	return cudaStatus;
+}
+void createHistParallel_(const int* numbers, int size, int *hist, int histSize)
+{	int *allHists, numOfThreads;
+#pragma omp parallel shared(hist, histSize, numbers, size, allHists) 
+{
+	int tid;
+#pragma omp single
+	{
+		numOfThreads = omp_get_num_threads();
+		allHists = (int*) calloc(histSize * numOfThreads, sizeof(int));
+	}
+
+	tid = omp_get_thread_num();
+
+#pragma omp for
+	for(int i = 0; i < size; i++)
+	{
+		allHists[numbers[i] + tid * histSize]++;
+	}
+
+#pragma omp parallel for
+	for(int i = 0; i < histSize; i++)
+	{
+		hist[i] = 0;
+		for(int j = 0; j < numOfThreads; j++)
+		{
+			hist[i] += allHists[i + j * histSize];
+		}
+	}
+
+}
+free(allHists);
+}
+void printIntArray(const int *array, int size)
+{
+	for(int i = 0; i < size; i++)
+	{
+		if(i % 17 == 0)
+		{
+			printf("\n");
+		}
+		printf("%d\t", array[i]);
+	}
+	printf("\n");
+}
+void  TIMER(cudaEvent_t start,cudaEvent_t end){
+	cudaEventRecord(start, 0); 
+}
+float TIMERvalue(cudaEvent_t start,cudaEvent_t end){
+	float timeValue;
+	cudaEventRecord(end, 0);   
+	cudaEventSynchronize(end); 
+	cudaEventElapsedTime( &timeValue, start, end ); 
+	return timeValue;
+}
