@@ -1,5 +1,3 @@
-
-
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
@@ -8,6 +6,7 @@
 #include <time.h>
 #include <string.h>
 #define nBlocks 1
+#define  numOfThreads 64 /**** IMPORTANT: The number of threads should be 2^n otherwise it wont run properlay...  ***/
 void printIntArray(const int *array, int size);
 void generateRandomIntArray(int *numbers, int size, int max);
 cudaError_t createHistParallel(int* numbers, int size, int *hist, int histSize);
@@ -15,29 +14,24 @@ void createHistParallel_(const int* numbers, int size, int *hist, int histSize);
 void printIntArray(const int *array, int size);
 void  TIMER(cudaEvent_t start,cudaEvent_t end);
 float TIMERvalue(cudaEvent_t start,cudaEvent_t end);
-__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads);
+__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists);
 
-__global__ void addKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads)
+__global__ void addKernel(int *hist, int *numbers,int size,int * allhists)
 {
-	int tid = threadIdx.x;
-	int sizet= numOfThreads*size;
-	int step = tid*size;
-	int i;
+	int tid = threadIdx.x,i,hist_size = numOfThreads*size,step=tid*size;
 	for(i = step; i < step+size; i++)
 	{
-		allhists[numbers[i] + tid*sizet]++;
+		allhists[numbers[i] + tid*hist_size]++;
 	}
 }
-__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists,int numOfThreads)
+__global__ void addTotalKernel(int *hist, int *numbers,int size,int * allhists)
 {	
-	int tid = threadIdx.x;
-	size = size*numOfThreads;
-	int i;
-	for(i = 0; i < size; i++)
+	int tid = threadIdx.x,hist_size = size*numOfThreads,i;
+	for(i = tid*size; i < tid*size+size; i++)
 	{
 		for(int j = 0; j < numOfThreads; j++)
 		{
-			hist[i] += allhists[i + j *size];
+			hist[i] += allhists[i + j *hist_size];
 		}
 	}
 }
@@ -101,13 +95,10 @@ int main()
 cudaError_t createHistParallel(int* numbers, int size, int *hist, int histSize)
 {
 
-
 	printf("Running Cuda, allocating memory...");
-	int *Cnumbers ,*Chist;
+	int *Cnumbers ,*Chist,jumpSize = 256/ numOfThreads;
 	cudaError_t cudaStatus;
-	int numOfThreads =1;
-	cudaEvent_t start;
-	cudaEvent_t end;
+	cudaEvent_t start, end;
 	cudaEventCreate( &start );
 	cudaEventCreate( &end );
 	TIMER(start,end);
@@ -116,81 +107,48 @@ cudaError_t createHistParallel(int* numbers, int size, int *hist, int histSize)
 	cudaStatus = cudaSetDevice(0);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Error;
 	}
 
 	// Allocate GPU buffers for three vectors (two input, one output)    .
 	cudaStatus = cudaMalloc((void**)&Cnumbers, size * sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
 
 	cudaStatus = cudaMalloc((void**)&Chist, size * sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
+	
 	cudaStatus = cudaMalloc((void**)&c_allHists, size * sizeof(int)*numOfThreads);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
+	
 	cudaStatus = cudaMemcpy(Cnumbers, numbers, size * sizeof(int), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-
-	for(int i =0 ; i <histSize * numOfThreads;i++)
-		allHists[i] =0;
 
 	cudaStatus = cudaMemcpy(c_allHists,allHists, histSize * numOfThreads* sizeof(int), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
+	
 	// Copy input vectors from host memory to GPU buffers.
 	// Launch a kernel on the GPU with one thread for each element.
 
 	printf("\nFinished allocating memory, time takes : %f ms.\nRunning kernel...",TIMERvalue(start,end));
 	TIMER(start,end);
-	int jumpSize = 256/ numOfThreads;
-	addKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists,numOfThreads);
-	addTotalKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists,numOfThreads);
+	addKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists);
+	addTotalKernel<<<nBlocks, numOfThreads>>>(Chist, Cnumbers,  jumpSize,c_allHists);
 	printf("\nFinished Running kernel, time taken : %f ms.\n",TIMERvalue(start,end));
 
 	// cudaDeviceSynchronize waits for the kernel to finish, and returns
 	// any errors encountered during the launch.
 	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-		goto Error;
-	}
-
+	
 	// Copy output vector from GPU buffer to host memory.
 	cudaStatus = cudaMemcpy(hist, Chist, size * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-Error:
 	cudaFree(Chist);
 	cudaFree(Cnumbers);
 	return cudaStatus;
+
 }
 void createHistParallel_(const int* numbers, int size, int *hist, int histSize)
-{	int *allHists, numOfThreads;
+{	int *allHists, numThreads;
 #pragma omp parallel shared(hist, histSize, numbers, size, allHists) 
 {
 	int tid;
 #pragma omp single
 	{
-		numOfThreads = omp_get_num_threads();
-		allHists = (int*) calloc(histSize * numOfThreads, sizeof(int));
+		numThreads = omp_get_num_threads();
+		allHists = (int*) calloc(histSize * numThreads, sizeof(int));
 	}
 
 	tid = omp_get_thread_num();
@@ -205,7 +163,7 @@ void createHistParallel_(const int* numbers, int size, int *hist, int histSize)
 	for(int i = 0; i < histSize; i++)
 	{
 		hist[i] = 0;
-		for(int j = 0; j < numOfThreads; j++)
+		for(int j = 0; j < numThreads; j++)
 		{
 			hist[i] += allHists[i + j * histSize];
 		}
