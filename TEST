@@ -99,4 +99,120 @@ void bubble_sorty(point *list, int size)
 }
 
 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+#define K 1
+struct point {
+	int id, x, y;
+};
+/*
+*Bubble sort at the moment, switch to 	Quicksort if it works.....
+*1. sort the points by x,y - newxp,newyp are the positions for the numbers in the new arrray .
+*2. get the new positions whichi will be according to the calc given.
+*3. NOTE: not done yet, add and sort the point by the new positions calculated.
+*/
+
+int* bubble_sortx(point *list, int size);
+int* bubble_sorty(point *list, int size);
+void main() {
+	int arraySize = 10;
+	int max = 10;
+	point *points = (point*)malloc(sizeof(point)*arraySize);
+	srand(time(NULL));
+	for (int i = 0; i < arraySize; i++) {
+		points[i].x = rand() % max;
+		points[i].y = rand() % max;
+		points[i].id = i;
+	}
+	printf("\nBefore:-->\n");
+	for (int i = 0; i < arraySize; i++) {
+		printf("id : %d,,,x = %d,y= %d\n",points[i].id, points[i].x, points[i].y);
+	}
+	int*idx=bubble_sortx(points, arraySize);
+	int*idy=bubble_sorty(points, arraySize);
+	printf("\nAfter:-->\n");
+	for (int i = 0; i < arraySize; i++) {
+		printf("ID: %d,,,x = %d,y= %d,positions = %d,%d\n", points[i].id,points[i].x, points[i].y,idx[i],idy[i]);
+	}
+
+	getchar();
+
+
+
+}
+
+
+
+
+
+int* bubble_sortx(point *list, int size)
+{
+	int c, d;
+	point t;
+
+	for (c = 0; c < (size - 1); c++)
+	{
+		for (d = 0; d < size - c - 1; d++)
+		{
+			if (list[d].x > list[d + 1].x)
+			{
+				t = list[d];
+				list[d] = list[d + 1];
+				list[d + 1] = t;
+			}
+		}
+	}
+	int *ids2=  (int*)malloc(sizeof(int)*size);
+	for (d = 0; d < size; d++)
+	{
+		ids2[d]= list[d].id;
+	}
+	return ids2;
+}
+
+int* bubble_sorty(point *list, int size)
+{
+	int c, d;
+	point t;
+	int *ids =( int*)malloc(sizeof(int)*size);
+	for (c = 0; c < (size - 1); c++)
+	{
+		for (d = 0; d < size - c - 1; d++)
+		{
+			if (list[d].y > list[d + 1].y)
+			{
+				t = list[d];
+				list[d] = list[d + 1];
+				list[d + 1] = t;
+			}
+		}
+	}	
+
+	for (d = 0; d < size ; d++)
+	{
+		ids[d] = list[d].id;
+	}
+	return ids;
+}
+
+void search(int* idx, int*idy, int n,int size) {
+	int num;
+	int*p = (int*)malloc(sizeof(int)*K);
+	int yn;
+	for (int i = 0; i < size; i++) {
+		if (idx[n] == idy[i])
+			yn = i;
+	}
+	for (int i = 0; i < size; i++) {
+
+		if (idx[n] == idy[i])
+			
+	}
+
+}
+
 ///ANOTHER TEST
