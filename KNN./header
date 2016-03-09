@@ -1,22 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define Ofile "results.txt"
+#define Ifile "points_123.txt"
 #include <algorithm>
-#define THREADS 2500// 2^9
-#define BLOCKS 1 // 2^15
-#define L THREADS*BLOCKS
-#define M 10
-#define K 4
+#define DEFAULT_THREADS (128)// 2^9
+#define DEFAULT_BLOCKS 1 // 2^15
+#define DEFAULT_L DEFAULT_THREADS*DEFAULT_BLOCKS
+#define DEFAULT_M 100
+#define DEFAULT_K 4
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
-
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+
+
 
 struct point {
 	double x;
@@ -24,20 +26,27 @@ struct point {
 	int id;
 };
 
-void generateRandomIntArray(point *numbers, int size, int max);
-int** start(int start, int finish,int length, point* arr);
+
+point* FileIOIn(int& length,int&k);
+void FileIO(int**arr,int length,int K);
+int** start(int start,int finish,int length,point * arr,int K);
+void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L) ;
+void calc(point current, point* sByx, point* sByy,  int length,int* res,int K) ;
+void printResult(int** arr, int length,int k) ;
+void innerSort(point* arr,int length,point cur);
+void generateRandomIntArray(point *arr, int length, int max);
+void bitonic_sort(point *values,int XxY,int BLOCKS,int THREADS);
+__global__ void bitonic_sort_stepY(point*dev_values, int j, int k);
+__global__ void bitonic_sort_stepX(point*dev_values, int j, int k);
+
+
 void print(point* arr, int length);
 int  findPointer(point* arr, point p, int length);
-void calc(point current, point* sByx, point* sByy, int length, int* res);
 void Sort(int xOry, point* arr, int length);
-void printResult(int** arr, int length);
 point* calc_minDest(int* pointers, point* sByx, point* sByy, point cur);
-void findCommon(point current, point* sByx, point* sByy, int* pointers, int& resL, int* res);
 int  findPointer(point* arr, point p, int length);
 double calc_dest(point a, point b);
-void innerSort(point* arr,int length,point cur);
-void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers, int& resL, int* res);
-
+void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers, int& resL, int* res,int k);
 
 void print_elapsed(clock_t start, clock_t stop)
 {
@@ -50,33 +59,21 @@ float random_float()
   return (float)rand()/(float)RAND_MAX;
 }
 
-/*
-k=1 --. by y
-k==0 by x
-
-*/
-
 __global__ void bitonic_sort_stepX(point*dev_values, int j, int k)
 {
-  unsigned int i, ixj; /* Sorting partners: i and ixj */
+  unsigned int i, ixj;
   i = threadIdx.x + blockDim.x * blockIdx.x;
   ixj = i^j;
-
-  /* The threads with the lowest ids sort the array. */
   if ((ixj)>i) {
     if ((i&k)==0) {
-      /* Sort ascending */ // cccr by -x 
 		if (dev_values[i].x >dev_values[ixj].x) {
-        /* exchange(i,ixj); */
         point temp = dev_values[i];
         dev_values[i] = dev_values[ixj];
         dev_values[ixj] = temp;
       }
     }
     if ((i&k)!=0) {
-      /* Sort descending */  //cccr by y
 		if (dev_values[i].x<dev_values[ixj].x) {
-        /* exchange(i,ixj); */
         point temp = dev_values[i];
         dev_values[i] = dev_values[ixj];
         dev_values[ixj] = temp;
@@ -87,16 +84,12 @@ __global__ void bitonic_sort_stepX(point*dev_values, int j, int k)
 
 __global__ void bitonic_sort_stepY(point*dev_values, int j, int k)
 {
-  unsigned int i, ixj; /* Sorting partners: i and ixj */
+  unsigned int i, ixj;
   i = threadIdx.x + blockDim.x * blockIdx.x;
   ixj = i^j;
-
-  /* The threads with the lowest ids sort the array. */
   if ((ixj)>i) {
     if ((i&k)==0) {
-      /* Sort ascending */ // cccr by -x 
 		if (dev_values[i].y >dev_values[ixj].y) {
-        /* exchange(i,ixj); */
         point temp = dev_values[i];
         dev_values[i] = dev_values[ixj];
         dev_values[ixj] = temp;
@@ -105,7 +98,6 @@ __global__ void bitonic_sort_stepY(point*dev_values, int j, int k)
     if ((i&k)!=0) {
 
 		if (dev_values[i].y<dev_values[ixj].y) {
-        /* exchange(i,ixj); */
         point temp = dev_values[i];
         dev_values[i] = dev_values[ixj];
         dev_values[ixj] = temp;
@@ -114,9 +106,10 @@ __global__ void bitonic_sort_stepY(point*dev_values, int j, int k)
   }
 }
 
-void bitonic_sort(point *values,int XxY)
+void bitonic_sort(point *values,int XxY,int BLOCKS,int THREADS)
 {
   point *dev_values;
+  int L =BLOCKS*THREADS;
   size_t size = L * sizeof(point);
 
   cudaMalloc((void**) &dev_values, size);
@@ -139,9 +132,6 @@ void bitonic_sort(point *values,int XxY)
   cudaMemcpy(values, dev_values, size, cudaMemcpyDeviceToHost);
   cudaFree(dev_values);
 }
-void InitiateMPI(){
-
-}
 
 void print(point* arr,int length) {
 	for (int i = 0; i < length; i++)
@@ -149,19 +139,20 @@ void print(point* arr,int length) {
 }
 void generateRandomIntArray(point *arr, int length, int max)
 {
+	srand((unsigned)time(NULL));
 	for (int i = 0; i < length; i++)
 	{
-		arr[i].x = rand() % max;
-		arr[i].y = rand() % max;
+		arr[i].x = ((double)rand()/(double)RAND_MAX)*max;
+		arr[i].y = ((double)rand()/(double)RAND_MAX)*max;
 		arr[i].id =i+1;
 	}
 }
 
-void printResult(int** arr, int length) {
+void printResult(int** arr, int length,int k) {
 	int j;
 	for (int i = 0; i < length; i++){
 		printf("%d -[",i+1);
-		for(j=0 ; j < K -1;j++)
+		for(j=0 ; j < k -1;j++)
 			printf("%d,",arr[i][j]);
 		printf("%d]\n",arr[i][j]);
 	}
@@ -192,23 +183,18 @@ void Sort(int xOry,point* arr,int length) {
 		}
 	}
 }
-void calc(point current, point* sByx, point* sByy,  int length,int* res) {
-	int* p = (int*)malloc(sizeof(int) * 2);
+void calc(point current, point* sByx, point* sByy,  int length,int* res,int K) {
 	int* pointers = (int*)malloc(sizeof(int) * 4);
-//	getchar();
 	int initialxPos = findPointer(sByx, current, length);
 	int initialyPos = findPointer(sByy, current, length);
 	int resL = 0;
-//	printf("point %d - (%d,%d)\n",current.id, initialxPos, initialyPos);
-//	getchar();
 	pointers[0] = initialxPos;
 	pointers[1] = initialxPos;
 	pointers[2] = initialyPos;
 	pointers[3] = initialyPos;
 	while (resL<K) {
-		moveAhead(current, sByx, sByy, length, pointers, resL, res);
+		moveAhead(current, sByx, sByy, length, pointers, resL, res,K);
 	}
-	free(p);
 	free(pointers);
 }
 point* calc_minDest(int* pointers, point* sByx, point* sByy,point cur) {
@@ -217,7 +203,7 @@ point* calc_minDest(int* pointers, point* sByx, point* sByy,point cur) {
 	return (MIN(one,two)== one? sByx : sByy);
 }
 
-void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers, int& resL, int* res) {
+void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers, int& resL, int* res,int k) {
 	int ENTEREDY=0, ENTEREDX=0;
 	int here=0;
 	if (memcmp(sByx,calc_minDest(pointers, sByx, sByy, current),sizeof(point)*length)== 0){
@@ -236,10 +222,10 @@ void moveAhead(point current, point* sByx, point* sByy, int length, int* pointer
 		(pointers[0] - 1>=0 ? pointers[0]-- :NULL);
 		(pointers[1] + 1 < length ? pointers[1]++ :NULL );
 	}
-	findCommon(current, sByx, sByy, pointers, resL, res);
+	findCommon(current, sByx, sByy, pointers, resL, res,k,length);
 }
 
-void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res) {
+void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L) {
 	int in = 0;	
 	int tempL =0,tempSize=2*K;
 	double one = MAX(cur.x - sByx[pointers[0]].x, sByx[pointers[1]].x - cur.x);
@@ -259,7 +245,15 @@ void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int
 					in = 1;
 			}
 			if (in == 0 && calc_dest(cur, sByx[i]) <= rad) {
+				if(tempSize >tempL+1)
 				temp[tempL++] = sByx[i];
+				else{
+					tempSize+=K;
+					temp = (point*)realloc(temp, 5 * sizeof(point));
+					temp[tempL++] = sByx[i];
+					printf("inc. mem\n");
+				}
+
 			}
 			in = 0;
 		}
@@ -288,7 +282,7 @@ void innerSort(point* arr,int length,point cur){
 		for (d = 0; d < length - c - 1; d++)
 		{
 			
-			if (calc_dest(arr[d],cur) > calc_dest(arr[d + 1],cur)) /* For decreasing order use < */
+			if (calc_dest(arr[d],cur) > calc_dest(arr[d + 1],cur))
 			{
 				swap = arr[d];
 				arr[d] = arr[d + 1];
@@ -298,23 +292,77 @@ void innerSort(point* arr,int length,point cur){
 		}
 	}
 }
-int** start(int start,int finish,int length,point * arr) {
+int** start(int start,int finish,int length,point * arr,int K) {
 	int** res = new int*[length];
 	point* sByx = (point*)calloc(length, sizeof(point));
 	point* sByy = (point*)calloc(length, sizeof(point));
 	memcpy(sByx, arr, sizeof(point)*length);
-
 	memcpy(sByy, arr, sizeof(point)*length);
-	bitonic_sort(sByx,0);
-	bitonic_sort(sByy,1);
-	printf("\nSorting done...\nInitiating KNN Calculation...");
+	bitonic_sort(sByx,0,1,length);
+	bitonic_sort(sByy,1,1,length);
+	getchar();
+	printf("\nSorting done...\nInitiating KNN Calculation...%d",length);
 	for (int i = start; i < finish; i++) {
-		res[i] =(int*)calloc( K,sizeof(int));
-		calc(arr[i], sByx, sByy, length,res[i]);
+		res[i] =(int*)calloc(K,sizeof(int));
+		calc(arr[i], sByx, sByy, length,res[i],K);
 	}
+	getchar();
 	printf("Finished.");
 	getchar();
 	free(sByx);
 	free(sByy);
 	return res;
+}
+
+
+void FileIO(int**arr,int length,int K){ 
+	FILE *out;
+	out = fopen(Ofile,"w");
+if (out == NULL) {
+  fprintf(stderr, "Can't open output file %s!\n",
+          Ofile);
+  return;
+}
+	int j;
+	for (int i = 0; i < length; i++){
+		fprintf(out,"%d ",i+1);
+		for(j=0 ; j < K -1;j++)
+			fprintf(out,"%d ",arr[i][j]);
+		fprintf(out,"%d\n",arr[i][j]);
+	}
+	  fprintf(out, "finished.");
+	fclose(out);
+}
+point *FileIOIn(int& length,int& k){ 
+	FILE *in;
+	point *arr;
+	in = fopen(Ifile,"r+");
+	if (in == NULL) {
+	fprintf(stderr, "Can't open output file %s!\n",
+          Ifile);
+	arr = (point*)malloc(sizeof(point)*DEFAULT_THREADS);
+  	generateRandomIntArray(arr, DEFAULT_THREADS, DEFAULT_M);
+	in = fopen(Ifile,"w");
+	fprintf(in,"%d ",DEFAULT_THREADS);
+	fprintf(in,"%d\n",DEFAULT_K);
+	for(int i =0 ; i < DEFAULT_L;i++)
+		fprintf(in,"%d %f %f\n",arr[i].id,arr[i].x,arr[i].y);
+	length =DEFAULT_THREADS;
+	k = DEFAULT_K;
+	fclose(in);
+	return arr;
+}
+else{
+fscanf(in,"%d",&length );
+getchar();
+fscanf(in,"%d",&k);
+arr = (point*)calloc(length,sizeof(point));
+printf("%d,%d\n",length,k);
+for(int i =0 ; i < length ;i++)
+{
+	 fscanf(in,"%d %lf %lf",&arr[i].id,&arr[i].x,&arr[i].y);
+}
+fclose(in);
+return arr;
+}
 }
