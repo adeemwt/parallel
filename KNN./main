@@ -1,20 +1,24 @@
-#include "sr_header.h"
+#include "header.h"
+
 
 int main(void)
 {
-
-	point* arr = (point*)malloc(sizeof(point)*L);
-	generateRandomIntArray(arr, L, M);
-	print(arr, L);
+	point* arr;
+	int length=0,k=0;
+	arr =FileIOIn(length,k);
+	print(arr, length);
 	int** res;
 	clock_t startT, stop;
 	startT = clock();
-	res = start(0, L, L, arr);
+
+	res = start(0, length, length, arr,k);
 	stop = clock();
 	printf("\Algorithm complete...");
 	print_elapsed(startT, stop);	
+	printResult(res,length,k);
+	FileIO(res,length,k);
 	getchar();
 	free(res);
-
 	free(arr);
 }
+
