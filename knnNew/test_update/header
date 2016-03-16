@@ -1,0 +1,441 @@
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define Ofile "results.txt"
+#define Ifile "whateve2221r.txt"
+#include <algorithm>
+#define DEFAULT_THREADS 3000
+#define DEFAULT_BLOCKS 1
+#define DEFAULT_L DEFAULT_THREADS*DEFAULT_BLOCKS
+#define DEFAULT_M 100
+#define DEFAULT_K 3
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <time.h>
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+//#include <mpi.h>
+#include <omp.h>
+
+#include "avl.h"
+
+struct point {
+	double x;
+	double y;
+	int id;
+};
+point* FileIOIn(int& length,int&k);
+void FileIO(int**arr,int length,int K);
+int** start(int start,int finish,int length,point * arr,int K);
+void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L) ;
+void calc(point current, point* sByx, point* sByy,  int length,int* res,int K) ;
+void printResult(int** arr, int length,int k) ;
+void innerSort(point* arr,int length,point cur);
+void generateRandomIntArray(point *arr, int length, int max);
+void bitonic_sort(point *values,int XxY,int BLOCKS,int THREADS);
+__global__ void bitonic_sort_stepY(point*dev_values, int j, int k);
+__global__ void bitonic_sort_stepX(point*dev_values, int j, int k);
+void print(point* arr, int length);
+int  findPointer(point* arr, point p, int length);
+void Sort(int xOry, point* arr, int length);
+void findUsingavl(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L);
+int calc_minDest(int* pointers, point* sByx, point* sByy, point cur);
+int  findPointer(point* arr, point p, int length);
+__global__ void calc_CUDA(point* points, point* sByx, point* sByy,  int length,int* res[],int K);
+double calc_dest(point a, point b);
+void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers,int k);
+void print_elapsed(clock_t start, clock_t stop)
+{
+  double elapsed = ((double) (stop - start)) / CLOCKS_PER_SEC;
+  printf("Elapsed time: %.3fs\n", elapsed);
+}
+float random_float()
+{
+  return (float)rand()/(float)RAND_MAX;
+}
+int FindNearestPowerofn(int length){
+	for(int i =0 ; i<20;i++){
+		if(pow(2.0,i)>=length)
+			return i;
+	}
+}
+__global__ void bitonic_sort_stepX(point*dev_values, int j, int k)
+{
+
+  unsigned int i, ixj;
+  i = threadIdx.x + blockDim.x * blockIdx.x;
+  ixj = i^j;
+  if ((ixj)>i) {
+    if ((i&k)==0) {
+		if (dev_values[i].x >dev_values[ixj].x) {
+        point temp = dev_values[i];
+        dev_values[i] = dev_values[ixj];
+        dev_values[ixj] = temp;
+      }
+    }
+    if ((i&k)!=0) {
+		if (dev_values[i].x<dev_values[ixj].x) {
+        point temp = dev_values[i];
+        dev_values[i] = dev_values[ixj];
+        dev_values[ixj] = temp;
+      }
+    }
+  }
+}
+__global__ void bitonic_sort_stepY(point*dev_values, int j, int k)
+{
+  unsigned int i, ixj;
+  i = threadIdx.x + blockDim.x * blockIdx.x;
+  ixj = i^j;
+  if ((ixj)>i) {
+    if ((i&k)==0) {
+		if (dev_values[i].y >dev_values[ixj].y) {
+        point temp = dev_values[i];
+        dev_values[i] = dev_values[ixj];
+        dev_values[ixj] = temp;
+      }
+    }
+    if ((i&k)!=0) {
+
+		if (dev_values[i].y<dev_values[ixj].y) {
+        point temp = dev_values[i];
+        dev_values[i] = dev_values[ixj];
+        dev_values[ixj] = temp;
+      }
+    }
+  }
+}
+ void bitonic_sort(point *values,int XxY,int BLOCKS,int THREADS)
+{
+  point *dev_values;
+  int L =BLOCKS*THREADS;
+  size_t size = L * sizeof(point);
+
+  cudaMalloc((void**) &dev_values, size);
+  cudaMemcpy(dev_values, values, size, cudaMemcpyHostToDevice);
+
+  dim3 blocks(BLOCKS,1);    /* Number of blocks   */
+  dim3 threads(THREADS,1);  /* Number of threads  */
+
+  int j, k;
+  /* Major step */
+  for (k = 2; k <= L; k <<= 1) {
+    /* Minor step */
+    for (j=k>>1; j>0; j=j>>1) {
+		if(XxY==0)
+      bitonic_sort_stepX<<<blocks, threads>>>(dev_values, j, k);
+		else
+      bitonic_sort_stepY<<<blocks, threads>>>(dev_values, j, k);
+    }
+  }
+  cudaMemcpy(values, dev_values, size, cudaMemcpyDeviceToHost);
+  cudaFree(dev_values);
+}
+ void print(point* arr,int length) {
+	bool correct = true;
+	bool correcy = true;
+	for (int i = 0; i < length; i++){
+		if(i+1<length)
+		if(arr[i].x > arr[i+1].x)
+			correct = false;
+		if(i+1<length)
+		if(arr[i].y > arr[i+1].y)
+			correcy = false;
+	}
+	if(correct)
+	printf("x is true");
+	if(correcy)
+	printf("y is true\n");
+}
+ void generateRandomIntArray(point *arr, int length, int max)
+{
+
+	srand((unsigned)time(NULL));
+	for (int i = 0; i < length; i++)
+	{
+		arr[i].x= rand() % max;
+		arr[i].y = rand() % max;
+		//arr[i].x =((int) rand() / (RAND_MAX+1)) * (max+1) ;
+		//arr[i].y=	((int) rand() / (RAND_MAX+1)) * (max+1) +0;
+		arr[i].id = i;
+	}
+
+}
+ void printResult(int** arr, int length,int k) {
+	int j;
+	for (int i = 0; i < length; i++){
+		printf("%d -[",i+1);
+		for(j=0 ; j < k -1;j++)
+			printf("%d,",arr[i][j]);
+		printf("%d]\n",arr[i][j]);
+	}
+}
+ void Sort(int xOry,point* arr,int length) {
+	int c, d;
+	point swap;
+	for (c = 0; c < (length- 1); c++)
+	{
+		for (d = 0; d < length - c - 1; d++)
+		{
+			if (xOry==1) {
+			if (arr[d].x > arr[d + 1].x) /* For decreasing order use < */
+			{
+				swap = arr[d];
+				arr[d] = arr[d + 1];
+				arr[d + 1] = swap;
+			}
+			}
+			else {
+			if (arr[d].y > arr[d + 1].y) /* For decreasing order use < */
+			{
+				swap = arr[d];
+				arr[d] = arr[d + 1];
+				arr[d + 1] = swap;
+			}
+			}
+		}
+	}
+}
+ void calc(point current, point* sByx, point* sByy,  int length,int* res,int K) {
+	int* pointers = new int[4];
+	int initialxPos = findPointer(sByx, current, length);
+	int initialyPos = findPointer(sByy, current, length);
+	int resL = 0;
+	pointers[0] = initialxPos;
+	pointers[1] = initialxPos;
+	pointers[2] = initialyPos;
+	pointers[3] = initialyPos;
+	int o = 0;
+	while (resL<K) {
+		moveAhead(current, sByx, sByy, length, pointers,K);
+		//findCommon(current, sByx, sByy, pointers, resL, res,K,length);
+		findUsingavl(current, sByx, sByy, pointers, resL, res,K,length);
+		o++;
+	}printf("done, called move %d times\n",o);
+}
+ int calc_minDest(int* pointers, point* sByx, point* sByy,point cur) {
+	double one =MAX(cur.x - sByx[pointers[0]].x, sByx[pointers[1]].x - cur.x);
+	double two =MAX(cur.y - sByy[pointers[2]].y, sByy[pointers[3]].y - cur.y);
+	return (MIN(one,two)== one? 0 : 1);
+}
+ void moveAhead(point current, point* sByx, point* sByy, int length, int* pointers,int k) {//OK
+		(pointers[0]-1<0 ? NULL :pointers[0]--);
+		(pointers[2]-1<0 ? NULL :pointers[2]--);
+
+		(pointers[1]+1>length ? NULL :pointers[1]++);
+		(pointers[3]+1>length? NULL :pointers[3]++);
+
+		//printf("pointers now + %d,%d  %d,%d",pointers[0],pointers[1],pointers[2],pointers[3]);
+		//getchar();
+ }
+ /*
+ void findUsingavl(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L){
+	avl_tree_t *tree = NULL;
+	tree = avl_create();
+	int i;
+	avl_tree_t *tree2 = NULL;
+	tree2 = avl_create();
+	//point *temp = (point*)malloc(2*K*sizeof(point));
+	//int tempSize = 2*K;
+	int s =0;
+	 for(i = pointers[0];i<=pointers[1];i++){
+		 avl_insert( tree,sByx[i].id );
+	 }
+	 for(i = pointers[2];i<=pointers[3];i++)
+	 {
+		 if(avl_find( tree, sByy[i].id )&&!(avl_find(tree2,sByy[i].id))&&(s+1<2*K)&&sByy[i].id!=cur.id)
+			 temp[s++]=sByy[i];		 
+	 }
+	 //innerSort(temp,2*K,cur);
+	 i=0;
+	 while(i<s&&resL<=K)
+		res[resL++]=temp[i++].id;
+	 free(temp);
+	// avl_traverse_dfs( tree );
+ }
+ */
+
+ void newFind(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L){
+	 avl_tree_t *tree=NULL;
+	 tree = avl_create();
+
+
+
+
+
+ }
+
+
+ void findCommon(point cur, point* sByx, point* sByy, int* pointers,int& resL,int* res,int K,int L) {
+	int in = 0;	
+	int tempL =0,tempSize=2*K;
+	double one = MAX(cur.x - sByx[pointers[0]].x, sByx[pointers[1]].x - cur.x);
+	double two = MAX(cur.y - sByy[pointers[2]].y, sByy[pointers[3]].y - cur.y);
+	double rad = MIN(one, two);
+	point* temp = (point*)malloc(sizeof(point)*2*K);
+	if (pointers[0] == 0 && pointers[1]+1 == L || pointers[2] == 0 && pointers[3]+1 == L)
+		rad = MAX(one, two);
+
+	for (int i = pointers[0]; i <= pointers[1]; i++) {
+		for (int j = pointers[2]; j <= pointers[3]; j++) {
+			if (sByx[i].id == sByy[j].id&& sByx[i].id!=cur.id) {
+			if (calc_dest(cur, sByx[i]) <= rad) {
+				if(tempSize >tempL+1)
+					temp[tempL++] = sByx[i];
+				else{
+					tempSize+=K;
+					temp = (point*)realloc(temp, (tempSize+=K) * sizeof(point));
+					temp[tempL++] = sByx[i];
+					printf("inc. mem\n");
+				}
+
+			}
+		}
+		}
+	}
+	printf("here");
+	if(tempL >=K-resL)
+		innerSort(temp,tempL,cur);
+	for(int i=0 ; i <tempL;i++){
+		if(resL+1<=K)
+		res[resL++]=temp[i].id;
+	}
+	
+	printf("%d\n",resL);
+	free(temp);
+}
+ double calc_dest(point a,point b) {
+	return pow(pow(a.x - b.x, 2) + pow(a.y - b.y, 2),0.5);
+}
+ int  findPointer(point* arr, point p,int length) {
+	for (int i = 0; i < length; i++) {
+		if (arr[i].id == p.id)
+			return i;
+	}
+}
+ void innerSort(point* arr,int length,point cur){
+	int c, d;
+	point swap;
+	for (c = 0; c < (length); c++)
+	{
+		for (d = 0; d < length - c - 1; d++)
+		{
+			
+			if (calc_dest(arr[d],cur) > calc_dest(arr[d + 1],cur))
+			{
+				swap = arr[d];
+				arr[d] = arr[d + 1];
+				arr[d + 1] = swap;
+			}
+			
+		}
+	}
+}
+int** start(int start,int finish,int length,point * arr,int K) {
+	int** res = new int*[length];
+	arr = (point*)realloc(arr,sizeof(point)*pow(2.0,FindNearestPowerofn(length)));
+	for(int i =length; i <pow(2.0,FindNearestPowerofn(length));i++){
+		arr[i].x =  DEFAULT_M+1;
+		arr[i].y =  DEFAULT_M+1;
+		arr[i].id = i;
+	}
+	getchar();
+	point* sByx = (point*)calloc(pow(2.0,FindNearestPowerofn(length)), sizeof(point));
+	point* sByy = (point*)calloc(pow(2.0,FindNearestPowerofn(length)), sizeof(point));
+	memcpy(sByx, arr, sizeof(point)*pow(2.0,FindNearestPowerofn(length)));
+	memcpy(sByy, arr, sizeof(point)*pow(2.0,FindNearestPowerofn(length)));
+	int blocks = pow(2.0,FindNearestPowerofn(length))/1024;
+	printf("the power found is + %d\n",FindNearestPowerofn(length));
+	int threads =  1024;
+	double time1 = clock();
+	bitonic_sort(sByx,0,blocks,threads);
+	bitonic_sort(sByy,1,blocks,threads);
+	double time2 = clock();
+	printf("\nsorting done , elapsed time : %.9f\n , clock per sec = %.9f",(time2-time1)/CLOCKS_PER_SEC);
+	printf("sbyx\n\n\n");
+	print(sByx,length);	
+	printf("sbyy \n................\n\n\n");
+	print(sByy,length);
+	printf("\nSorting done...\nInitiating KNN Calculation...",length);
+	getchar();
+	
+	double time=0;
+		printf("here is the array after is increased");
+	#pragma omp parallel
+	{
+		#pragma omp for
+		for(int i = start; i < finish; i++)
+		{
+			res[i] =(int*)calloc(K,sizeof(int));
+			calc(arr[i], sByx, sByy, length,res[i],K);
+		if(i%1000==0)
+			printf("finished + - %d\n",i);
+		}
+	}
+	printf("Finished.");
+	getchar();
+	free(sByx);
+	free(sByy);
+	return res;
+}
+void FileIO(int**arr,int length,int K){ 
+	FILE *out;
+	out = fopen(Ofile,"w");
+	if (out == NULL) {
+	fprintf(stderr, "Can't open output file %s!\n",
+          Ofile);
+	return;
+	}
+	int j;
+	for (int i = 0; i < length; i++){
+		fprintf(out,"%d ",i+1);
+		for(j=0 ; j < K -1;j++)
+			fprintf(out,"%d ",arr[i][j]);
+		fprintf(out,"%d\n",arr[i][j]);
+	}
+	  fprintf(out, "finished.");
+	fclose(out);
+}
+point *FileIOIn(int& length,int& k){ 
+	FILE *in;
+	point *arr;
+	in = fopen(Ifile,"r+");
+	if (in == NULL) {
+	fprintf(stderr, "Can't open output file %s!\n",
+          Ifile);
+	arr = (point*)malloc(sizeof(point)*DEFAULT_L);
+  	generateRandomIntArray(arr, DEFAULT_L, DEFAULT_M);
+	in = fopen(Ifile,"w");
+	fprintf(in,"%d ",DEFAULT_L);
+	fprintf(in,"%d\n",DEFAULT_K);
+	for(int i =0 ; i < DEFAULT_L;i++)
+		fprintf(in,"%d %f %f\n",arr[i].id,arr[i].x,arr[i].y);
+	length =DEFAULT_L;
+	k = DEFAULT_K;
+	fclose(in);
+	return arr;
+}
+else{
+fscanf(in,"%d",&length );
+getchar();
+fscanf(in,"%d",&k);
+arr = (point*)calloc(length,sizeof(point));
+printf("%d,%d\n",length,k);
+int max=0;
+for(int i =0 ; i < length ;i++)
+{
+	 fscanf(in,"%d %lf %lf",&arr[i].id,&arr[i].x,&arr[i].y);
+	 if(max < arr[i].x)
+		 max = arr[i].x;
+}
+fclose(in);
+return arr;
+}
+}
+
+
